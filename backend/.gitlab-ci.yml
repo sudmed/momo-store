@@ -1,0 +1,132 @@
+variables:
+  VERSION: 1.0.${CI_PIPELINE_ID}
+  SAST_EXCLUDED_ANALYZERS: "eslint-sast,gosec,nodejs-scan-sast"
+  # var for hub.docker.com authenticating - to prevent error "toomanyrequests: reached pull rate limit"
+  DOCKER_AUTH_CONFIG: '{ "auths": { "https://index.docker.io/v1/": { "auth": "$DOCKER_AUTH" } }}'
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - project: 'templates/ci'
+    file: 'DockerInDockerTemplate.yml'
+
+
+stages:
+  - build
+  - test
+  - docker
+  - deploy
+
+
+build-backend:
+  stage: build
+  image: 
+    #name: golang:1.19.3
+    name: golang:1.18
+    entrypoint: [""]
+  script:
+    - echo "ARTIFACT_JOB_ID=${CI_JOB_ID}" > CI_JOB_ID.txt
+    - cd backend
+    - mkdir -p temp
+    - go build -o temp ./...
+    - cd ..
+    - mkdir -p momo-store-${VERSION}
+    - mv backend/temp/api momo-store-${VERSION}/backend-${VERSION}
+  after_script:
+    - tar czvf momo-store-${VERSION}.tar.gz momo-store-${VERSION}
+    - curl -v -u "${NEXUS_USER}:${NEXUS_PASS}" --upload-file momo-store-$VERSION.tar.gz ${NEXUS_URL}/06-momostore-pashkov-backend/$VERSION/momo-store-backend-$VERSION.tar.gz
+  artifacts:
+    paths:
+      - momo-store-${VERSION}/backend-${VERSION}
+    reports:
+      dotenv: CI_JOB_ID.txt
+  rules:
+    - changes:
+      - backend/**/*
+
+
+TestFakeAppIntegrational:
+  image:
+    name: golang:1.19.3
+    entrypoint: [""]
+  stage: test
+  script:
+    - cd backend
+    - go test -v ./...
+  rules:
+    - changes:
+        - backend/**/*
+
+
+sonarqube-backend:
+  stage: test
+  image:
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [""]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - cd backend
+    - sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY_BACKEND} -Dsonar.sources=. -Dsonar.host.url=${SONARQUBE_URL} -Dsonar.login=${SONAR_LOGIN}
+  rules:
+    - changes:
+      - backend/**/*
+  dependencies:
+    - build-backend
+
+
+spotbugs-sast:
+  stage: test
+  dependencies:
+    - build-backend
+
+
+docker-build-and-release:
+  stage: docker
+  image: docker:20.10.12-dind-rootless
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - mkdir -p $HOME/.docker
+    - echo "$DOCKER_AUTH_CONFIG" > $HOME/.docker/config.json
+  script:
+    - cd backend
+    - >
+      docker build
+      --no-cache
+      --build-arg VERSION=$VERSION
+      --tag $CI_REGISTRY_IMAGE/momo-backend:$VERSION
+      --tag $CI_REGISTRY_IMAGE/momo-backend:latest
+      .
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker push $CI_REGISTRY_IMAGE/momo-backend:$VERSION
+    - docker push $CI_REGISTRY_IMAGE/momo-backend:latest
+  rules:
+    - changes:
+      - backend/**/*
+
+
+deploy-backend:
+  stage: deploy
+  image: alpine:3.15.0
+  before_script:
+    - apk add openssh-client bash docker docker-compose
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "$SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - docker context create momo --docker "host=ssh://${DEV_USER}@${DEV_HOST}"
+    - docker --context momo login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} rm --stop --force backend
+    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} pull backend
+    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} up --detach --force-recreate backend
+    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} ps
+    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} top

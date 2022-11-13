@@ -1,0 +1,55 @@
+version: "3.7"
+services:
+
+  backend:
+    image: $CI_REGISTRY_IMAGE/momo-backend:latest
+    container_name: backend
+    restart: always
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: [ "CMD", "/usr/bin/wget", "--spider", "--tries=1", "http://localhost:8081/health" ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+    networks:
+      - momo-store
+
+  frontend:
+    image: $CI_REGISTRY_IMAGE/momo-frontend:latest
+    container_name: frontend
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    healthcheck:
+      test: curl --fail -s http://localhost | grep "Пельменная"
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - web-root:/usr/share/nginx/html
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+    networks:
+      - momo-store
+
+  certbot:
+    image: certbot/certbot:v1.31.0
+    container_name: certbot
+    volumes:
+      - web-root:/usr/share/nginx/html
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+    command: certonly --webroot --webroot-path=/usr/share/nginx/html --email ${CERTBOT_EMAIL} --agree-tos --no-eff-email --force-renewal -d ${CERTBOT_DOMAIN} -v
+
+networks:
+  momo-store:
+
+volumes:
+  certbot-etc:
+  certbot-var:
+  web-root:
