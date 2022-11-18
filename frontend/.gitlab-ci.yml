@@ -80,7 +80,7 @@ docker-build-and-release:
     - >
       docker build
       --no-cache
-      --build-arg VUE_APP_API_URL=$API_URL
+      --build-arg VUE_APP_API_URL=$API_URL_SWARM
       --build-arg VERSION=$VERSION
       --tag $CI_REGISTRY_IMAGE/momo-frontend:$VERSION
       --tag $CI_REGISTRY_IMAGE/momo-frontend:latest
@@ -97,21 +97,24 @@ deploy-frontend:
   stage: deploy
   image: alpine:3.15.0
   before_script:
-    - apk add openssh-client bash docker docker-compose
+    - apk add openssh-client bash docker
     - until docker info; do sleep 1; done
     - eval $(ssh-agent -s)
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - echo "$SSH_PRIVATE_KEY_SWARM" | tr -d '\r' | ssh-add -
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
-    - echo "$SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+    - ssh-keyscan -H $SWARM_HOST >> ~/.ssh/known_hosts
     - chmod 644 ~/.ssh/known_hosts
-    - docker context create momo --docker "host=ssh://${DEV_USER}@${DEV_HOST}"
+    - docker context create momo --docker "host=ssh://${SWARM_USER}@${SWARM_HOST}"
     - docker --context momo login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} rm --stop --force frontend
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} rm --stop --force certbot
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} up --detach --force-recreate certbot
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} pull frontend
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} up --detach --force-recreate frontend
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} ps
-    - docker-compose -H ssh://${DEV_USER}@${DEV_HOST} top
+    - if docker --context momo stack ls | grep momo-store | awk '{print $1;}';
+      then
+        echo "Momo-store stack found. Updating frontend service only...";
+        docker --context momo service update --with-registry-auth --image $CI_REGISTRY_IMAGE/momo-frontend:$VERSION momo-store_frontend;
+      else
+        echo "No momo-store services found. Full stack deploy started...";
+        docker --context momo stack deploy --with-registry-auth --resolve-image always --prune --compose-file docker-compose-stack.yml momo-store;
+      fi
+    - docker -H ssh://${SWARM_USER}@${SWARM_HOST} stack ls
+    - docker --context momo service ls

@@ -5,10 +5,8 @@ COPY . .
 RUN npx browserslist@latest --update-db && \
     npm install -g npm@8.19.3 && \
     npm install && \
-    VUE_APP_API_URL=${VUE_APP_API_URL} npm run build
+    VUE_APP_API_URL=${VUE_APP_API_URL} npm run build    
 
-#FROM nginxproxy/nginx-proxy
-#COPY --from=builder /usr/src/app/nginx.tmpl /app/nginx.tmpl
 FROM nginx:1.21.6-alpine
 RUN rm -rf /usr/share/nginx/html
 COPY --from=builder /usr/src/app/dist /usr/share/nginx/html
