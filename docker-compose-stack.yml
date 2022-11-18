@@ -1,0 +1,92 @@
+# Docker Compose Swarm Mode
+version: "3.8"
+services:
+
+  backend:
+    image: $CI_REGISTRY_IMAGE/momo-backend:latest
+    ports:
+      - "8081:8081"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 15s
+        order: start-first
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      placement:
+        constraints: 
+          - "node.role != manager"
+          - "node.labels.TAG == backend"
+    healthcheck:
+      test: [ "CMD", "/usr/bin/wget", "--spider", "--tries=1", "http://localhost:8081/health" ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+    networks:
+      - momo-store
+
+  frontend:
+    image: $CI_REGISTRY_IMAGE/momo-frontend:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 15s
+        order: start-first
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 5
+        window: 60s
+      placement:
+        constraints: 
+          - "node.role != manager"
+          - "node.labels.TAG == frontend"
+    healthcheck:
+      test: curl --fail -s http://localhost | grep "Пельменная"
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - web-root:/usr/share/nginx/html
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+    networks:
+      - momo-store
+
+  certbot:
+    image: certbot/certbot:v1.32.0
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG == frontend"
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 1
+        window: 120s
+    volumes:
+      - web-root:/usr/share/nginx/html
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+    command: certonly --webroot --webroot-path=/usr/share/nginx/html/ --email ${CERTBOT_EMAIL_SWARM} --agree-tos --no-eff-email --force-renewal -d ${CERTBOT_DOMAIN_SWARM} -v
+    depends_on:
+      - frontend
+
+networks:
+  momo-store:
+
+volumes:
+  web-root:
+  certbot-etc:
+  certbot-var:
