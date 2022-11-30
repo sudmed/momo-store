@@ -24,7 +24,7 @@ IP: 84.201.129.209
 
 
 ## Реализован полный цикл сборки-поставки приложения, используя практики CI/CD
-1. Код хранится в [GitLab](https://gitlab.praktikum-services.ru/d.pashkov/momo-store) с использованием модели ветвления gitflow.
+1. Код хранится в [GitLab](https://gitlab.praktikum-services.ru/d.pashkov/momo-store) с использованием модели ветвления github flow.
 2. В проекте присутствует модульный [.gitlab-ci.yml](https://gitlab.praktikum-services.ru/d.pashkov/momo-store/-/blob/master/.gitlab-ci.yml), в котором описаны шаги сборки. Изменения в папках frontend и backend запускаются дочерние пайплайны, который лежат в соответствующих папках.
 3. Артефакты сборки публикуются в систему хранения Nexus ([архивы фронтенда](https://nexus.praktikum-services.ru/service/rest/repository/browse/06-momostore-pashkov-frontend/), [бинарные файлы бэкенда](https://nexus.praktikum-services.ru/service/rest/repository/browse/06-momostore-pashkov-backend/), docker-образы хранятся в [Gitlab Container Registry](https://gitlab.praktikum-services.ru/d.pashkov/momo-store/container_registry).
 4. Артефакты сборки версионируются по правилам SemVer2.
